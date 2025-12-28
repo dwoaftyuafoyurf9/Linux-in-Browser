@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Linux</title>
+<title>Linux Simulator Mobile</title>
 <style>
 html, body {
     margin: 0;
@@ -15,20 +15,20 @@ html, body {
     flex-direction: column;
     overflow: hidden;
 }
-#topBar {
+#topBar{
     display: flex;
     justify-content: flex-end;
     background: #111;
     padding: 5px;
 }
-#downloadBtn {
+#downloadBtn{
     background: #222;
     color: #0f0;
     border: 1px solid #0f0;
     padding: 3px 8px;
     cursor: pointer;
 }
-#fileWindow {
+#fileWindow{
     position: absolute;
     top: 40px;
     right: 20px;
@@ -42,29 +42,28 @@ html, body {
     display: none;
     z-index: 1000;
 }
-#terminal {
+#terminal{
     flex: 1;
     padding: 10px;
     overflow-y: auto;
     white-space: pre-wrap;
 }
-#inputLine {
+#inputLine{
     display: flex;
     padding: 10px;
-    border-top: 1px solid #00ff00;
+    border-top: 1px solid #0f0;
 }
-#prompt { color: #0f0; }
-#commandInput {
-    flex: 1;
-    background: black;
-    border: none;
-    color: #0f0;
+#prompt{ color:#0f0; }
+#commandInput{
+    flex:1;
+    background:black;
+    border:none;
+    color:#0f0;
     font-family: monospace;
-    font-size: 16px;
-    outline: none;
+    font-size:16px;
+    outline:none;
 }
-::selection { background: #0f0; color: black; }
-a { color: #0f0; text-decoration: underline; cursor: pointer; }
+::selection { background:#0f0; color:black; }
 </style>
 </head>
 <body>
@@ -82,69 +81,59 @@ a { color: #0f0; text-decoration: underline; cursor: pointer; }
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
 <script>
-const terminal = document.getElementById("terminal");
-const commandInput = document.getElementById("commandInput");
-const promptEl = document.getElementById("prompt");
-const fileWindow = document.getElementById("fileWindow");
-const downloadBtn = document.getElementById("downloadBtn");
+const terminal=document.getElementById("terminal");
+const commandInput=document.getElementById("commandInput");
+const promptEl=document.getElementById("prompt");
+const fileWindow=document.getElementById("fileWindow");
+const downloadBtn=document.getElementById("downloadBtn");
 
-let cwd = "/";
-let pyodideReady = false;
+let cwd="/";
+let pyodideReady=false;
 let pyodide;
-let pythonMode = false;
-let commandHistory = [];
-let historyIndex = 0;
-let env = { USER:"root", HOSTNAME:"localhost", IP:"10.0.2.15" };
-let uptimeStart = Date.now();
+let pythonMode=false;
+let commandHistory=[];
+let historyIndex=0;
+let env={ USER:"root", HOSTNAME:"localhost", IP:"10.0.2.15" };
+let uptimeStart=Date.now();
 
-// Load FS from localStorage or initialize
-let fs = localStorage.getItem("vFS") ? JSON.parse(localStorage.getItem("vFS")) : { "/": { type:"dir", children:{} } };
+// Load FS from LocalStorage or init
+let fs=localStorage.getItem("vFS") ? JSON.parse(localStorage.getItem("vFS")) : { "/": { type:"dir", children:{} } };
 
-function saveFS() { localStorage.setItem("vFS", JSON.stringify(fs)); }
+function saveFS(){ localStorage.setItem("vFS", JSON.stringify(fs)); }
 
-function print(text="") {
-    terminal.innerHTML += text + "\n";
-    terminal.scrollTop = terminal.scrollHeight;
-}
+function print(text=""){ terminal.innerHTML+=text+"\n"; terminal.scrollTop=terminal.scrollHeight; }
 
-function getPath(path) {
-    if (!path || path===".") return cwd;
-    if (path.startsWith("/")) return path;
-    return cwd==="/" ? "/"+path : cwd+"/"+path;
-}
+function getPath(path){ if(!path || path===".") return cwd; if(path.startsWith("/")) return path; return cwd==="/" ? "/"+path : cwd+"/"+path; }
 
-function getNode(path) {
-    const parts = path.split("/").filter(Boolean);
-    let node = fs["/"];
-    for(const p of parts){
-        if(!node.children[p]) return null;
-        node = node.children[p];
-    }
+function getNode(path){
+    const parts=path.split("/").filter(Boolean);
+    let node=fs["/"];
+    for(const p of parts){ if(!node.children[p]) return null; node=node.children[p]; }
     return node;
 }
 
 async function setupPyodide(){
-    pyodide = await loadPyodide();
+    pyodide=await loadPyodide();
     pyodide.globals.set("print",(msg)=>{ print(msg); });
-    pyodideReady = true;
+    pyodideReady=true;
 }
 
 function formatUptime(ms){
-    let totalSec = Math.floor(ms/1000);
-    let days = Math.floor(totalSec/86400);
+    let totalSec=Math.floor(ms/1000);
+    let days=Math.floor(totalSec/86400);
     totalSec%=86400;
-    let hrs = Math.floor(totalSec/3600);
+    let hrs=Math.floor(totalSec/3600);
     totalSec%=3600;
-    let mins = Math.floor(totalSec/60);
-    let secs = totalSec%60;
+    let mins=Math.floor(totalSec/60);
+    let secs=totalSec%60;
     return `${days} days, ${hrs} hrs, ${mins} mins, ${secs} secs`;
 }
 
 // Recursively list all files for download
-function listFiles(node, path="/"){
+function listFiles(node,path="/"){
     let files=[];
     if(node.type==="file") files.push({name:path, content:node.content});
-    if(node.type==="dir") for(let k in node.children) files=files.concat(listFiles(node.children[k], path==="/"?"/"+k:path+"/"+k));
+    if(node.type==="dir") for(let k in node.children) files=files.concat(listFiles(node.children[k], path==="/" ? "/"+k : path+"/"+k));
     return files;
 }
 
@@ -154,7 +143,7 @@ function updateFileWindow(){
     files.forEach(f=>{
         const link=document.createElement("a");
         link.textContent=f.name;
-        link.href=URL.createObjectURL(new Blob([f.content],{type:"text/plain"}));
+        link.href=URL.createObjectURL(new Blob([f.content],{type:"text/html"}));
         link.download=f.name.split("/").pop();
         fileWindow.appendChild(link);
         fileWindow.appendChild(document.createElement("br"));
@@ -318,8 +307,26 @@ async function handleCommand(cmd){
 ls, cd, pwd, touch, mkdir, rmdir, rm, cat, echo, cp, mv,
 whoami, hostname, date, uptime, history, alias, unalias,
 env, export, df, du, ps, top, ping, ifconfig, sleep, python3,
-man, cal, help`);
+man, cal, help, makeserver`);
             break;
+        case "makeserver": {
+            const file=getNode(getPath(args[1]));
+            if(!file || file.type!=="file") return print("File not found");
+            const port=args[2] ? args[2] : "8080";
+            print(`Serving Server on Port: <span style="color:#0f0; cursor:pointer" id="serverPort">${port}</span>`);
+            setTimeout(()=>{
+                const portEl=document.getElementById("serverPort");
+                if(portEl){
+                    portEl.onclick=()=>{
+                        const win=window.open("","Server"+port,"width=600,height=400");
+                        // Wrap content in full HTML, safe isolation
+                        win.document.write('<!DOCTYPE html><html><head><title>Server: '+port+'</title></head><body>'+file.content+'</body></html>');
+                        win.document.close();
+                    }
+                }
+            },10);
+            break;
+        }
         default: print(`command not found: ${base}`);
     }
     promptEl.innerText=`root@localhost:${cwd} `;
@@ -336,7 +343,7 @@ commandInput.addEventListener("keydown",async(e)=>{
         if(historyIndex>0){ historyIndex--; commandInput.value=commandHistory[historyIndex]; }
     } else if(e.key==="ArrowDown"){
         if(historyIndex<commandHistory.length-1){ historyIndex++; commandInput.value=commandHistory[historyIndex]; }
-        else { historyIndex=commandHistory.length; commandInput.value=""; }
+        else{ historyIndex=commandHistory.length; commandInput.value=""; }
     }
 });
 
@@ -347,4 +354,4 @@ promptEl.innerText=`root@localhost:${cwd}`;
 </script>
 
 </body>
-  </html>
+</html>
