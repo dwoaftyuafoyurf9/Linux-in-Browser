@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Linux</title>
+<style>
+html, body {
+    margin: 0;
+    padding: 0;
+    background: black;
+    color: #00ff00;
+    font-family: monospace;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#topBar {
+    display: flex;
+    justify-content: flex-end;
+    background: #111;
+    padding: 5px;
+}
+#downloadBtn {
+    background: #222;
+    color: #0f0;
+    border: 1px solid #0f0;
+    padding: 3px 8px;
+    cursor: pointer;
+}
+#fileWindow {
+    position: absolute;
+    top: 40px;
+    right: 20px;
+    width: 300px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: #000;
+    color: #0f0;
+    border: 1px solid #0f0;
+    padding: 10px;
+    display: none;
+    z-index: 1000;
+}
+#terminal {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+#inputLine {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #00ff00;
+}
+#prompt { color: #0f0; }
+#commandInput {
+    flex: 1;
+    background: black;
+    border: none;
+    color: #0f0;
+    font-family: monospace;
+    font-size: 16px;
+    outline: none;
+}
+::selection { background: #0f0; color: black; }
+a { color: #0f0; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div id="topBar">
+    <button id="downloadBtn">Files</button>
+</div>
+
+<div id=fileWindow></div>
+<div id="terminal"></div>
+<div id="inputLine">
+    <span id="prompt">root@localhost:/ </span>
+    <input id="commandInput" type="text" autofocus />
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+<script>
+const terminal = document.getElementById("terminal");
+const commandInput = document.getElementById("commandInput");
+const promptEl = document.getElementById("prompt");
+const fileWindow = document.getElementById("fileWindow");
+const downloadBtn = document.getElementById("downloadBtn");
+
+let cwd = "/";
+let pyodideReady = false;
+let pyodide;
+let pythonMode = false;
+let commandHistory = [];
+let historyIndex = 0;
+let env = { USER:"root", HOSTNAME:"localhost", IP:"10.0.2.15" };
+let uptimeStart = Date.now();
+
+// Load FS from localStorage or initialize
+let fs = localStorage.getItem("vFS") ? JSON.parse(localStorage.getItem("vFS")) : { "/": { type:"dir", children:{} } };
+
+function saveFS() { localStorage.setItem("vFS", JSON.stringify(fs)); }
+
+function print(text="") {
+    terminal.innerHTML += text + "\n";
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+function getPath(path) {
+    if (!path || path===".") return cwd;
+    if (path.startsWith("/")) return path;
+    return cwd==="/" ? "/"+path : cwd+"/"+path;
+}
+
+function getNode(path) {
+    const parts = path.split("/").filter(Boolean);
+    let node = fs["/"];
+    for(const p of parts){
+        if(!node.children[p]) return null;
+        node = node.children[p];
+    }
+    return node;
+}
+
+async function setupPyodide(){
+    pyodide = await loadPyodide();
+    pyodide.globals.set("print",(msg)=>{ print(msg); });
+    pyodideReady = true;
+}
+
+function formatUptime(ms){
+    let totalSec = Math.floor(ms/1000);
+    let days = Math.floor(totalSec/86400);
+    totalSec%=86400;
+    let hrs = Math.floor(totalSec/3600);
+    totalSec%=3600;
+    let mins = Math.floor(totalSec/60);
+    let secs = totalSec%60;
+    return `${days} days, ${hrs} hrs, ${mins} mins, ${secs} secs`;
+}
+
+// Recursively list all files for download
+function listFiles(node, path="/"){
+    let files=[];
+    if(node.type==="file") files.push({name:path, content:node.content});
+    if(node.type==="dir") for(let k in node.children) files=files.concat(listFiles(node.children[k], path==="/"?"/"+k:path+"/"+k));
+    return files;
+}
+
+function updateFileWindow(){
+    const files=listFiles(fs["/"]);
+    fileWindow.innerHTML="";
+    files.forEach(f=>{
+        const link=document.createElement("a");
+        link.textContent=f.name;
+        link.href=URL.createObjectURL(new Blob([f.content],{type:"text/plain"}));
+        link.download=f.name.split("/").pop();
+        fileWindow.appendChild(link);
+        fileWindow.appendChild(document.createElement("br"));
+    });
+}
+
+downloadBtn.addEventListener("click",()=>{
+    fileWindow.style.display=fileWindow.style.display==="none"?"block":"none";
+    updateFileWindow();
+});
+
+async function handleCommand(cmd){
+    commandHistory.push(cmd);
+    historyIndex=commandHistory.length;
+
+    if(pythonMode){
+        if(cmd==="exit()"){ pythonMode=false; return; }
+        try{ await pyodide.runPythonAsync(cmd); } catch(e){ print(e.toString()); }
+        return;
+    }
+
+    const args=cmd.split(" ");
+    const base=args[0];
+
+    switch(base){
+        case "": break;
+        case "clear": terminal.innerHTML=""; break;
+        case "pwd": print(cwd); break;
+        case "ls": {
+            const node=getNode(cwd);
+            print(node?Object.keys(node.children).join("  "):"No such directory");
+            break;
+        }
+        case "cd": {
+            const path=getPath(args[1]||"/");
+            const node=getNode(path);
+            if(node && node.type==="dir") cwd=path; else print("No such directory");
+            break;
+        }
+        case "mkdir": {
+            const path=getPath(args[1]);
+            const parts=path.split("/").filter(Boolean);
+            let parent=fs["/"];
+            for(let i=0;i<parts.length-1;i++) parent=parent.children[parts[i]];
+            parent.children[parts.at(-1)]={type:"dir",children:{}};
+            saveFS();
+            break;
+        }
+        case "rmdir": {
+            const path=getPath(args[1]);
+            const node=getNode(path);
+            if(node && node.type==="dir" && Object.keys(node.children).length===0){
+                const parts=path.split("/").filter(Boolean);
+                let parent=fs["/"];
+                for(let i=0;i<parts.length-1;i++) parent=parent.children[parts[i]];
+                delete parent.children[parts.at(-1)];
+                saveFS();
+            }else print("Directory not empty or does not exist");
+            break;
+        }
+        case "touch": {
+            const path=getPath(args[1]);
+            const parts=path.split("/").filter(Boolean);
+            let parent=fs["/"];
+            for(let i=0;i<parts.length-1;i++) parent=parent.children[parts[i]];
+            parent.children[parts.at(-1)]={type:"file",content:""};
+            saveFS();
+            break;
+        }
+        case "echo": {
+            const match=cmd.match(/echo\s+(.+)\s+>\s+(.+)/);
+            if(!match) return print("Usage: echo text > file");
+            const content=match[1];
+            const filePath=getPath(match[2]);
+            const parts=filePath.split("/").filter(Boolean);
+            let parent=fs["/"];
+            for(let i=0;i<parts.length-1;i++) parent=parent.children[parts[i]];
+            parent.children[parts.at(-1)]={type:"file",content};
+            saveFS();
+            break;
+        }
+        case "cat": {
+            const node=getNode(getPath(args[1]));
+            if(!node || node.type!=="file") return print("No such file");
+            print(node.content);
+            break;
+        }
+        case "rm": {
+            const path=getPath(args[1]);
+            const parts=path.split("/").filter(Boolean);
+            let parent=fs["/"];
+            for(let i=0;i<parts.length-1;i++) parent=parent.children[parts[i]];
+            delete parent.children[parts.at(-1)];
+            saveFS();
+            break;
+        }
+        case "cp": {
+            const src=getNode(getPath(args[1]));
+            const destPath=getPath(args[2]);
+            if(!src) return print("Source not found");
+            const parts=destPath.split("/").filter(Boolean);
+            let parent=fs["/"];
+            for(let i=0;i<parts.length-1;i++) parent=parent.children[parts[i]];
+            parent.children[parts.at(-1)]=JSON.parse(JSON.stringify(src));
+            saveFS();
+            break;
+        }
+        case "mv": {
+            const srcPath=getPath(args[1]);
+            const destPath=getPath(args[2]);
+            const src=getNode(srcPath);
+            if(!src) return print("Source not found");
+            const srcParts=srcPath.split("/").filter(Boolean);
+            let srcParent=fs["/"];
+            for(let i=0;i<srcParts.length-1;i++) srcParent=srcParent.children[srcParts[i]];
+            delete srcParent.children[srcParts.at(-1)];
+            const destParts=destPath.split("/").filter(Boolean);
+            let destParent=fs["/"];
+            for(let i=0;i<destParts.length-1;i++) destParent=destParent.children[destParts[i]];
+            destParent.children[destParts.at(-1)]=src;
+            saveFS();
+            break;
+        }
+        case "whoami": print(env.USER); break;
+        case "hostname": print(env.HOSTNAME); break;
+        case "date": print(new Date().toString()); break;
+        case "uptime": print(formatUptime(Date.now()-uptimeStart)); break;
+        case "history": commandHistory.forEach((c,i)=>print(`${i+1}  ${c}`)); break;
+        case "ifconfig":
+        case "ip": print(`eth0: ${env.IP}`); break;
+        case "ping":
+            print(`PING ${args[1]} (Simulated) 56(84) bytes of data`);
+            print(`64 bytes from ${args[1]}: icmp_seq=1 ttl=64 time=1 ms`);
+            print(`--- ${args[1]} ping statistics ---`);
+            print(`1 packets transmitted, 1 received, 0% packet loss`);
+            break;
+        case "df": print("Filesystem     1K-blocks   Used Available Use% Mounted on\n/dev/root       10240000 5120000 5120000 50% /"); break;
+        case "du": print(`${args[1]||'.'} 1024`); break;
+        case "ps": print("PID TTY      TIME CMD\n1 ? 00:00:01 init\n2 ? 00:00:00 bash"); break;
+        case "top": print("top - 00:00:01 up ... 2 users\nPID USER PR NI VIRT RES %CPU %MEM COMMAND\n1 root 20 0 100 50 0.1 0.1 init"); break;
+        case "grep": print("Simulated grep output"); break;
+        case "head": print("Simulated head output"); break;
+        case "tail": print("Simulated tail output"); break;
+        case "alias": print("Simulated alias list"); break;
+        case "unalias": print("Simulated unalias"); break;
+        case "env": for(const k in env) print(`${k}=${env[k]}`); break;
+        case "export": const kv=args[1].split("="); env[kv[0]]=kv[1]; break;
+        case "sleep": await new Promise(res=>setTimeout(res,(parseInt(args[1])||1)*1000)); break;
+        case "python3":
+            if(!pyodideReady){ print("Loading python3..."); await setupPyodide(); }
+            if(args[1]){
+                const file=getNode(getPath(args[1]));
+                if(!file) return print("File not found");
+                try{ await pyodide.runPythonAsync(file.content); }catch(e){print(e.toString());}
+            }else{ pythonMode=true; print("Python 3.11.0 (Pyodide)"); print("Type exit() to quit"); }
+            break;
+        case "man": print(`No manual entry for ${args[1]||''}`); break;
+        case "cal": print("Simulated calendar"); break;
+        case "help":
+            print(`Available commands:
+ls, cd, pwd, touch, mkdir, rmdir, rm, cat, echo, cp, mv,
+whoami, hostname, date, uptime, history, alias, unalias,
+env, export, df, du, ps, top, ping, ifconfig, sleep, python3,
+man, cal, help`);
+            break;
+        default: print(`command not found: ${base}`);
+    }
+    promptEl.innerText=`root@localhost:${cwd} `;
+}
+
+commandInput.addEventListener("keydown",async(e)=>{
+    if(e.key==="Enter"){
+        e.preventDefault();
+        const cmd=commandInput.value;
+        print(promptEl.innerText+cmd);
+        commandInput.value="";
+        await handleCommand(cmd);
+    } else if(e.key==="ArrowUp"){
+        if(historyIndex>0){ historyIndex--; commandInput.value=commandHistory[historyIndex]; }
+    } else if(e.key==="ArrowDown"){
+        if(historyIndex<commandHistory.length-1){ historyIndex++; commandInput.value=commandHistory[historyIndex]; }
+        else { historyIndex=commandHistory.length; commandInput.value=""; }
+    }
+});
+
+print("Linux Simulator Mobile (Virtual IP: 10.0.2.15)");
+print("SSH Connection: localhost@8080");
+print("Type 'help' to see available commands");
+promptEl.innerText=`root@localhost:${cwd}`;
+</script>
+
+</body>
+  </html>
